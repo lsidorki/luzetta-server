@@ -14,6 +14,15 @@ class DataEntry:
     label: ""
 
 
+class Credits:
+    artist: ""
+    album: ""
+    credits: ""
+
+
+album_credits_dict = dict([])
+
+
 def get_parser(h):
     parser = argparse.ArgumentParser(description='LUZetta tracklist processor.', add_help=h)
     parser.add_argument('-i', '--input', nargs=1, metavar='INPUT_FILE_PATH', help='Excel file path', required=False)
@@ -36,18 +45,70 @@ def get_track_info(result):
         return track
 
 
-def fetch_tidal_data(session, query):
-    result = session.search(query=query, models=None, limit=50, offset=0)
+def fetch_track_credits(track_name, album_tracklist):
+    for single_track in album_tracklist:
+        if single_track['item']['title'] == track_name:
+            return single_track
 
+
+def exists_in_cache(album_key):
+    return album_credits_dict.get(album_key)
+
+
+def add_to_cache(album_key, credits_value):
+    album_credits_dict[album_key] = credits_value
+
+
+def fetch_tidal_data(session, query):
+    composer_dict = {'Composer', 'Producer', 'Co-Producer', 'Misc. Prod.'
+                     'Featured Artist', 'Vocals', 'Associated Performer', 'Beat Boxing', 'Background Vocal',
+                     'Drums', 'Electric Guitar', 'Lead Guitar', 'Percussion', 'Piano', 'Guitar', 'Synthesizer', 'Bass',
+                     'Saxophone', 'Upright Bass', 'Viola da Gamba', 'Keyboards', 'Additional Synthesizer',
+                     'Bass guitar', 'Backing Vocals', 'Drum Programming', 'Violin', 'Viola', 'Bass Trombone',
+                     'Trombone', 'Trumpet', 'Cello', 'All Instruments', 'Drum Programmer', 'Programmer',
+                     'Instrumentation', 'Drum Machine', 'Organ', 'Mellotron', 'Flute', 'Clavichord', 'Clarinet',
+                     'Wurlitzer Electric Piano', 'Saxophones', 'Horn'}
+    lyricist_dict = {'Lyricist', 'Writer', 'Lead Vocalist', 'Co-Writer', 'Lead Vocals', 'Arranger', 'Vocal',
+                     'Songwriter', 'Vocalist', 'Author'}
+
+    composer = set()
+    lyricist = set()
+    missing = set()
+
+    result = session.search(query=query, models=None, limit=50, offset=0)
     track_info = get_track_info(result)
+
     if track_info is not None:
         print("Track: " + track_info.artist.name + " - " + track_info.name
               + " [" + track_info.album.name + "][" + str(track_info.album.year) + "]")
-        track_info_extended = session.track(track_info.id)
-        album_info = session.album(track_info.album.id)
-        page_info = album_info.page()
-        for artist in track_info.artists:
-            print("// (Artists : " + artist.name + ", " + artist.role.name + ")")
+        album_credits = None
+        if exists_in_cache(track_info.artist.name + " - " + track_info.album.name) is not None:
+            album_credits = album_credits_dict[track_info.artist.name + " - " + track_info.album.name]
+            print("*** READ FROM CACHE ***")
+        else:
+            album_info = session.album(track_info.album.id)
+            album_credits = album_info.credits()
+            add_to_cache(track_info.artist.name + " - " + track_info.album.name, album_credits)
+        track_credits = fetch_track_credits(track_info.name, album_credits)
+
+        for credit in track_credits['credits']:
+            for contributor in credit['contributors']:
+                if credit['type'] in composer_dict:
+                    composer.add(contributor['name'])
+                elif credit['type'] in lyricist_dict:
+                    lyricist.add(contributor['name'])
+                else:
+                    missing.add(credit['type'])
+
+        if len(composer) == 0:
+            composer.add(track_info.artist.name)
+        if len(lyricist) == 0:
+            lyricist.add(track_info.artist.name)
+
+        print('Composer: ' + ', '.join(composer))
+        print('Lyricist: ' + ', '.join(lyricist))
+        print('Missing Role: ' + ', '.join(missing))
+        print('----------------------')
 
 
 def process_input_data(input_data):
